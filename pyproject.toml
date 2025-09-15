@@ -5,5 +5,58 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "allure-pytest>=2.15.0",
+    "isort>=6.0.1",
+    "loguru>=0.7.3",
+    "mypy>=1.18.1",
     "pytest>=8.4.2",
+    "ruff>=0.13.0",
+]
+
+
+[tool.ruff]
+exclude = ["migrations", "tests/legacy"]
+target-version = "py313"
+
+[tool.ruff.format]
+indent-style = "space"
+line-ending = "lf"
+quote-style = "double"
+skip-magic-trailing-comma = false
+
+
+[tool.ruff.lint]
+select = [
+  "E",   # pycodestyle errors
+  "W",   # pycodestyle warnings
+  "F",   # pyflakes
+  "I",   # isort
+  "UP",  # pyupgrade
+  "S",   # flake8-bandit
+  "B",   # flake8-bugbear
+  "C4",  # flake8-comprehensions
+]
+ignore = [
+    "E501", # игнорировать длинные строки
+    "S101", # assert в коде
+
+]
+
+
+[tool.ruff.lint.isort]
+known-first-party = ["cpu_emulator"]
+order-by-type = true
+
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+enable_error_code = ["ignore-without-code", "redundant-expr"]
+warn_return_any = true
+exclude = [
+    "tests",
 ]
