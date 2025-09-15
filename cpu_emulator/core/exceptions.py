@@ -8,3 +8,7 @@ class BadAddressException(MemoryException):
 
 class OutOfMemoryException(MemoryException):
     pass
+
+
+class RegisterException(Exception):
+    pass
