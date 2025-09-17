@@ -37,8 +37,11 @@ class TestFlags:
 
     @pytest.mark.parametrize("test_data", test_data)
     @allure.title('Тест обновления флагов')
-    def test_update_flag(self, flag_fabric, test_data):
+    def test_flag_basic_update(self, flag_fabric, test_data):
         flags = flag_fabric()
         value, result = test_data
+
+        flags.update(value, value)
+
 
 
