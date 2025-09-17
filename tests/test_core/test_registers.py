@@ -27,3 +27,10 @@ class TestRegisters:
             registers[reg_num] = value
             got_value = registers[reg_num]
             assert expected == got_value
+
+    @allure.title("Тест сброса регистров")
+    def test_registers_reset(self, registers_fabric):
+        registers = registers_fabric()
+        registers[0] = 10
+        registers.reset()
+        assert registers[0] == 0

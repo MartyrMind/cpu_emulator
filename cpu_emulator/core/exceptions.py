@@ -12,3 +12,6 @@ class OutOfMemoryException(MemoryException):
 
 class RegisterException(Exception):
     pass
+
+class FlagException(Exception):
+    pass
