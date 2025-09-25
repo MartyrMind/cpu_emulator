@@ -21,7 +21,7 @@ def get_project_root() -> Path:
     return Path(__file__).parent.parent.parent
 
 
-def setup_logger() -> None:
+def setup_logger(log_level: str = "DEBUG") -> None:
     global SETUP_COMPLETE
     logger.remove()
 
@@ -29,15 +29,16 @@ def setup_logger() -> None:
     log_dir = project_root / "logs"
     log_dir.mkdir(exist_ok=True)
 
-    console_level = (
-        "INFO"
-        if os.getenv("ENVIRONMENT", "development").lower() == "production"
-        else "DEBUG"
-    )
+    if not log_level:
+        log_level = (
+            "INFO"
+            if os.getenv("ENVIRONMENT", "development").lower() == "production"
+            else "DEBUG"
+        )
 
     logger.add(
         sys.stdout,
-        level=console_level,
+        level=log_level,
         format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
         "<level>{level: <8}</level> | "
         "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - "

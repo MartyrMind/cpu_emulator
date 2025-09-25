@@ -30,6 +30,18 @@ class Registers:
     def _operate_register(
         self, reg_num: int, value: int | None = None, op: str | None = "get"
     ) -> int | None:
+        # В RISC-V стиле SP доступен как обычный регистр
+        # R0-R7: обычные регистры, R8: SP (stack pointer)
+        if reg_num == 8:  # SP как R8 для RISC-V стиля
+            if op == "get":
+                value = self.sp
+                logger.debug(f"Got 0x{value:08X} from SP (R8)")
+                return value
+            else:
+                self.sp = value
+                logger.debug(f"Set 0x{value:08X} to SP (R8)")
+                return None
+
         special_reg_mapping = {0x10: "pc", 0x11: "ir", 0x12: "sp"}
         if 0 <= reg_num < self.gpr_count:
             if op == "get":
