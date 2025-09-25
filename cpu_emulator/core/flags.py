@@ -9,7 +9,8 @@ class Flags:
             'Z': 0,  # Zero flag
             'S': 0,  # Sign flag
             'C': 0,  # Carry flag
-            'O': 0  # Overflow flag
+            'O': 0,  # Overflow flag
+            'P': 0   # Parity flag
         }
 
     def get(self, flag_name: str) -> int:
@@ -28,7 +29,9 @@ class Flags:
         self.flags['Z'] = 1 if op_result == 0 else 0
         # проверяем, что установлен старший бит
         self.flags['S'] = 1 if op_result & 0x80000000 else 0
-        logger.debug(f"Updated flags: Z={self.flags['Z']}, S={self.flags['S']}")
+        # вычисляем четность младших 8 бит
+        self.flags['P'] = self._calculate_parity(op_result & 0xFF)
+        logger.debug(f"Updated flags: Z={self.flags['Z']}, S={self.flags['S']}, P={self.flags['P']}")
 
     def arithmetic_update(self, a: int, b: int, result: int, operation: str) -> None:
         a = a & 0xFFFFFFFF
@@ -47,6 +50,68 @@ class Flags:
         logger.debug(f"Arithmetic flags updated: Z={self.flags['Z']}, S={self.flags['S']}, "
                      f"C={self.flags['C']}, O={self.flags['O']}")
 
+    def logical_update(self, result: int) -> None:
+        """Обновление флагов для логических операций (AND, OR, XOR, NOT)"""
+        result = result & 0xFFFFFFFF
+        self.basic_update(result)
+        # Логические операции сбрасывают флаги переноса и переполнения
+        self.flags['C'] = 0
+        self.flags['O'] = 0
+        logger.debug(f"Logical flags updated: Z={self.flags['Z']}, S={self.flags['S']}, "
+                     f"C={self.flags['C']}, O={self.flags['O']}, P={self.flags['P']}")
+
+    def shift_update(self, result: int, carry_out: int = 0) -> None:
+        """Обновление флагов для операций сдвига"""
+        result = result & 0xFFFFFFFF
+        self.basic_update(result)
+        self.flags['C'] = carry_out & 1
+        # Для сдвигов флаг переполнения обычно не определен или равен 0
+        self.flags['O'] = 0
+        logger.debug(f"Shift flags updated: Z={self.flags['Z']}, S={self.flags['S']}, "
+                     f"C={self.flags['C']}, O={self.flags['O']}, P={self.flags['P']}")
+
+    def shift_left_update(self, original: int, count: int, result: int) -> None:
+        """Обновление флагов для сдвига влево"""
+        if count == 0:
+            self.basic_update(result)
+            return
+            
+        carry_out = (original >> (32 - count)) & 1 if count <= 32 else 0
+        self.shift_update(result, carry_out)
+
+    def shift_right_update(self, original: int, count: int, result: int) -> None:
+        """Обновление флагов для логического сдвига вправо"""
+        if count == 0:
+            self.basic_update(result)
+            return
+            
+        carry_out = (original >> (count - 1)) & 1 if count > 0 else 0
+        self.shift_update(result, carry_out)
+
+    def rotate_update(self, result: int, carry_out: int = 0) -> None:
+        """Обновление флагов для операций поворота"""
+        self.shift_update(result, carry_out)
+
+    def multiplication_update(self, result: int, full_result: int) -> None:
+        """Обновление флагов для операции умножения"""
+        result = result & 0xFFFFFFFF
+        self.basic_update(result)
+        # Флаг переноса устанавливается, если результат не помещается в 32 бита
+        self.flags['C'] = 1 if full_result > 0xFFFFFFFF else 0
+        # Флаг переполнения для умножения обычно не определен
+        self.flags['O'] = 0
+        logger.debug(f"Multiplication flags updated: Z={self.flags['Z']}, S={self.flags['S']}, "
+                     f"C={self.flags['C']}, O={self.flags['O']}, P={self.flags['P']}")
+
+    def division_update(self, quotient: int) -> None:
+        """Обновление флагов для операции деления"""
+        quotient = quotient & 0xFFFFFFFF
+        self.basic_update(quotient)
+        # Деление не устанавливает флаги переноса и переполнения
+        self.flags['C'] = 0
+        self.flags['O'] = 0
+        logger.debug(f"Division flags updated: Z={self.flags['Z']}, S={self.flags['S']}, "
+                     f"C={self.flags['C']}, O={self.flags['O']}, P={self.flags['P']}")
 
     def reset(self) -> None:
         for flag in self.flags:
@@ -90,6 +155,14 @@ class Flags:
         wrong_result = (a_signed >= 0) != (result_signed >= 0)
 
         self.flags['O'] = 1 if different_signs and wrong_result else 0
+
+    def _calculate_parity(self, value: int) -> int:
+        """Вычисляет четность (1 для четного количества единиц, 0 для нечетного)"""
+        count = 0
+        while value:
+            count += value & 1
+            value >>= 1
+        return 1 if count % 2 == 0 else 0
 
     def __getitem__(self, flag_name: str) -> int:
         return self.get(flag_name)
