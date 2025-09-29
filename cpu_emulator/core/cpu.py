@@ -166,6 +166,8 @@ class CPU:
 
             # Увеличиваем PC на 4 байта (размер команды)
             self.registers.pc = (pc + 4) & 0xFFFFFFFF
+            # Сохраняем загруженную команду в IR для отладки/GUI
+            self.registers.ir = instruction
 
             logger.debug(f"Fetched instruction 0x{instruction:08X} from PC=0x{pc:05X}")
             return instruction

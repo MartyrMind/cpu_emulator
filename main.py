@@ -1,6 +1,9 @@
+import argparse
+
 from cpu_emulator.core.cpu import CPU
 from cpu_emulator.core.program_loader import ProgramLoader
 from cpu_emulator.utils.logger_config import setup_logger
+from cpu_emulator.gui import run_gui
 
 setup_logger(log_level="INFO")
 
@@ -78,7 +81,7 @@ def demo_array_sum():
     cpu.load_program(machine_code)
 
     print("\nВыполнение программы...")
-    cpu.run(max_cycles=100)
+    cpu.run(max_cycles=1000)
 
     result = cpu.registers[0]  # Результат в R0
     print(f"\nРезультат суммирования: {result}")
@@ -235,14 +238,22 @@ def demo_long_arithmetic():
 
 
 def main():
-    """Главная функция с демонстрацией возможностей CPU"""
+    """Главная функция: запуск GUI или демонстраций"""
+    parser = argparse.ArgumentParser(description="CPU Emulator")
+    parser.add_argument("--gui", action="store_true", help="Run Tkinter GUI")
+    args = parser.parse_args()
+
+    if args.gui:
+        run_gui()
+        return
+
     try:
         # demo_basic_operations()
         # demo_conditional_jumps()
         # demo_stack_operations()
         demo_array_sum()
         demo_array_convolution()
-        demo_long_arithmetic()
+        # demo_long_arithmetic()
 
         print("\n=== Демонстрация завершена успешно! ===")
 
