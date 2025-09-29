@@ -137,13 +137,13 @@ class CPU:
             return
 
         try:
-            # FETCH: Загрузка команды из памяти
+            # FETCH
             instruction_word = self.fetch_instruction()
 
-            # DECODE: Декодирование команды
+            # DECODE
             instruction = self.decoder.decode(instruction_word)
 
-            # EXECUTE: Выполнение команды
+            # EXECUTE
             self.execute_instruction(instruction)
 
             self.cycle_count += 1
@@ -272,6 +272,20 @@ class CPU:
                 self._execute_js(instruction)
             elif opcode == OpCode.JNS:
                 self._execute_jns(instruction)
+
+            # Команды длинной арифметики
+            elif opcode == OpCode.ADDC_REG:
+                self._execute_addc_reg(instruction)
+            elif opcode == OpCode.ADDC_IMM:
+                self._execute_addc_imm(instruction)
+            elif opcode == OpCode.SUBC_REG:
+                self._execute_subc_reg(instruction)
+            elif opcode == OpCode.SUBC_IMM:
+                self._execute_subc_imm(instruction)
+            elif opcode == OpCode.CLC:
+                self._execute_clc(instruction)
+            elif opcode == OpCode.STC:
+                self._execute_stc(instruction)
 
             # В RISC-V стиле нет отдельных PUSH/POP команд
             # Стековые операции выполняются через базовые инструкции:
@@ -496,6 +510,41 @@ class CPU:
         """JNS addr - переход если не Sign flag"""
         if not self.flags["S"]:
             self.registers.pc = instruction.address
+
+    # Реализация команд длинной арифметики
+    def _execute_addc_reg(self, instruction: Instruction) -> None:
+        """ADDC R1, R2 - R1 = R1 + R2 + Carry"""
+        dest_value = self.registers[instruction.dest_reg]
+        source_value = self.registers[instruction.source_reg]
+        result = self.alu.add_with_carry(dest_value, source_value)
+        self.registers[instruction.dest_reg] = result
+
+    def _execute_addc_imm(self, instruction: Instruction) -> None:
+        """ADDC R1, #imm - R1 = R1 + imm + Carry"""
+        dest_value = self.registers[instruction.dest_reg]
+        result = self.alu.add_with_carry(dest_value, instruction.immediate)
+        self.registers[instruction.dest_reg] = result
+
+    def _execute_subc_reg(self, instruction: Instruction) -> None:
+        """SUBC R1, R2 - R1 = R1 - R2 - Carry"""
+        dest_value = self.registers[instruction.dest_reg]
+        source_value = self.registers[instruction.source_reg]
+        result = self.alu.sub_with_carry(dest_value, source_value)
+        self.registers[instruction.dest_reg] = result
+
+    def _execute_subc_imm(self, instruction: Instruction) -> None:
+        """SUBC R1, #imm - R1 = R1 - imm - Carry"""
+        dest_value = self.registers[instruction.dest_reg]
+        result = self.alu.sub_with_carry(dest_value, instruction.immediate)
+        self.registers[instruction.dest_reg] = result
+
+    def _execute_clc(self, instruction: Instruction) -> None:
+        """CLC - очистить флаг Carry"""
+        self.alu.clear_carry()
+
+    def _execute_stc(self, instruction: Instruction) -> None:
+        """STC - установить флаг Carry"""
+        self.alu.set_carry()
 
     # В RISC-V стиле стековые операции реализуются через базовые команды:
     # PUSH R1: SUB R8, R8, #4; STORE [R8], R1

@@ -80,6 +80,16 @@ class OpCode(IntEnum):
     # Стековые операции выполняются через базовые инструкции:
     # PUSH R1 ≡ SUB SP, SP, #4; STORE [SP], R1
     # POP R1  ≡ LOAD R1, [SP]; ADD SP, SP, #4
+    
+    # Команды длинной арифметики (многоточные числа)
+    ADDC_REG = 0x80  # ADDC R1, R2 - R1 = R1 + R2 + Carry (сложение с переносом)
+    ADDC_IMM = 0x81  # ADDC R1, #imm - R1 = R1 + imm + Carry
+    SUBC_REG = 0x82  # SUBC R1, R2 - R1 = R1 - R2 - Carry (вычитание с займом)
+    SUBC_IMM = 0x83  # SUBC R1, #imm - R1 = R1 - imm - Carry
+    
+    # Вспомогательные команды для длинной арифметики
+    CLC = 0x84       # CLC - очистить флаг Carry
+    STC = 0x85       # STC - установить флаг Carry
 
 
 class InstructionType(IntEnum):
@@ -92,6 +102,7 @@ class InstructionType(IntEnum):
     LOAD = 4  # LOAD R1, [R2] (загрузка из памяти)
     STORE = 5  # STORE [R1], R2 (сохранение в память)
     JUMP = 6  # JMP addr (переходы)
+    FLAG_OP = 7  # CLC, STC (операции с флагами)
     # В RISC-V стиле нет отдельного типа стековых команд
 
 
@@ -124,8 +135,8 @@ class Instruction:
             return f"STORE [R{self.dest_reg}], R{self.source_reg}"
         elif self.instruction_type == InstructionType.JUMP:
             return f"{opcode_name} 0x{self.address:04X}"
-        elif self.instruction_type == InstructionType.STACK:
-            return f"{opcode_name} R{self.dest_reg}"
+        elif self.instruction_type == InstructionType.FLAG_OP:
+            return f"{opcode_name}"
         else:
             return f"{opcode_name} (unknown format)"
 
@@ -175,6 +186,15 @@ INSTRUCTION_FORMATS = {
     OpCode.JNC: InstructionType.JUMP,
     OpCode.JS: InstructionType.JUMP,
     OpCode.JNS: InstructionType.JUMP,
+    
+    # Команды длинной арифметики
+    OpCode.ADDC_REG: InstructionType.REG_REG,
+    OpCode.ADDC_IMM: InstructionType.REG_IMM,
+    OpCode.SUBC_REG: InstructionType.REG_REG,
+    OpCode.SUBC_IMM: InstructionType.REG_IMM,
+    OpCode.CLC: InstructionType.FLAG_OP,
+    OpCode.STC: InstructionType.FLAG_OP,
+    
     # В RISC-V стиле нет отдельных PUSH/POP команд
 }
 

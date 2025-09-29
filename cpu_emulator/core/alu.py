@@ -171,3 +171,52 @@ class ALU:
         self.flags.rotate_update(result, carry_out)
         logger.debug(f"ROR: 0x{a:08X} rotate right {count} = 0x{result:08X}")
         return result
+
+    # Операции длинной арифметики
+    def add_with_carry(self, a: int, b: int) -> int:
+        """Сложение с переносом: a + b + Carry"""
+        a = a & 0xFFFFFFFF
+        b = b & 0xFFFFFFFF
+        carry_in = self.flags.get('C')
+        
+        # Выполняем сложение с учетом входящего переноса
+        full_result = a + b + carry_in
+        result = full_result & 0xFFFFFFFF
+        
+        # Обновляем флаги
+        self.flags.basic_update(result)
+        
+        # Устанавливаем флаг переноса для следующей операции
+        self.flags.set('C', 1 if full_result > 0xFFFFFFFF else 0)
+        
+        logger.debug(f"ADDC: 0x{a:08X} + 0x{b:08X} + {carry_in} = 0x{result:08X}, Carry={self.flags.get('C')}")
+        return result
+
+    def sub_with_carry(self, a: int, b: int) -> int:
+        """Вычитание с займом: a - b - Carry"""
+        a = a & 0xFFFFFFFF
+        b = b & 0xFFFFFFFF
+        carry_in = self.flags.get('C')  # В вычитании Carry = заем
+        
+        # Выполняем вычитание с учетом займа
+        full_result = a - b - carry_in
+        result = full_result & 0xFFFFFFFF
+        
+        # Обновляем флаги
+        self.flags.basic_update(result)
+        
+        # Устанавливаем флаг займа для следующей операции
+        self.flags.set('C', 1 if full_result < 0 else 0)
+        
+        logger.debug(f"SUBC: 0x{a:08X} - 0x{b:08X} - {carry_in} = 0x{result:08X}, Carry={self.flags.get('C')}")
+        return result
+
+    def clear_carry(self) -> None:
+        """Очистить флаг переноса"""
+        self.flags.set('C', 0)
+        logger.debug("CLC: Carry flag cleared")
+
+    def set_carry(self) -> None:
+        """Установить флаг переноса"""
+        self.flags.set('C', 1)
+        logger.debug("STC: Carry flag set")

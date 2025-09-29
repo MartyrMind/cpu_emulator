@@ -162,6 +162,16 @@ class ProgramLoader:
         elif mnemonic == "JNS":
             return self._parse_jump(OpCode.JNS, parts[1:])
 
+        # Команды длинной арифметики
+        elif mnemonic == "ADDC":
+            return self._parse_arithmetic(OpCode.ADDC_REG, OpCode.ADDC_IMM, parts[1:])
+        elif mnemonic == "SUBC":
+            return self._parse_arithmetic(OpCode.SUBC_REG, OpCode.SUBC_IMM, parts[1:])
+        elif mnemonic == "CLC":
+            return create_instruction(OpCode.CLC)
+        elif mnemonic == "STC":
+            return create_instruction(OpCode.STC)
+
         else:
             raise ValueError(f"Unknown mnemonic: {mnemonic}")
 

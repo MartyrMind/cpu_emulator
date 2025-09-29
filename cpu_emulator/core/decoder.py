@@ -114,11 +114,10 @@ class InstructionDecoder:
             # Для переходов используем полные 16 бит как адрес
             instruction.address = operand
 
-        elif instruction_type == InstructionType.STACK:
-            # PUSH R1, POP R1 - стековые операции
-            self._validate_register(reg1)
-            instruction.dest_reg = reg1
-
+        elif instruction_type == InstructionType.FLAG_OP:
+            # CLC, STC - операции с флагами (без операндов)
+            pass
+            
         else:
             raise ValueError(f"Unknown instruction type: {instruction_type}")
 
@@ -164,9 +163,9 @@ class InstructionDecoder:
 
         elif instruction.instruction_type == InstructionType.JUMP:
             raw_instruction |= instruction.address & 0xFFFF
-
-        elif instruction.instruction_type == InstructionType.STACK:
-            raw_instruction |= (instruction.dest_reg & 0xFF) << 16
+            
+        elif instruction.instruction_type == InstructionType.FLAG_OP:
+            pass  # Только опкод, без операндов
 
         logger.debug(f"Encoded instruction {instruction} -> 0x{raw_instruction:08X}")
         return raw_instruction

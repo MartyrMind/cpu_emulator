@@ -165,6 +165,75 @@ def demo_array_convolution():
     print_cpu_state(cpu)
 
 
+def demo_long_arithmetic():
+    """Демонстрация длинной арифметики - сложение 64-битных чисел"""
+    print("\n=== Программа: Длинная арифметика (64-битные числа) ===")
+    
+    cpu = CPU()
+    loader = ProgramLoader()
+    
+    # Программа сложения двух 64-битных чисел:
+    # A = 0x123456789ABCDEF0 (младшие 32 бита: 0x9ABCDEF0, старшие: 0x12345678)
+    # B = 0x0FEDCBA987654321 (младшие 32 бита: 0x87654321, старшие: 0x0FEDCBA9)
+    # Результат должен быть: A + B = 0x2222222222222211
+    
+    program_assembly = [
+        # Упрощенный пример: сложение двух 64-битных чисел
+        # A = 0x00000001FFFFFFFF (младшие: 0xFFFFFFFF, старшие: 0x00000001)
+        # B = 0x0000000000000001 (младшие: 0x00000001, старшие: 0x00000000)
+        # Результат: 0x0000000200000000
+        
+        # Инициализация первого числа A
+        "MOV R0, #-1",           # R0 = 0xFFFFFFFF (младшие 32 бита A)
+        "MOV R1, #1",            # R1 = 0x00000001 (старшие 32 бита A)
+        
+        # Инициализация второго числа B
+        "MOV R2, #1",            # R2 = 0x00000001 (младшие 32 бита B)
+        "MOV R3, #0",            # R3 = 0x00000000 (старшие 32 бита B)
+        
+        # Длинное сложение: A + B
+        "CLC",                   # Очистить флаг переноса
+        "ADD R0, R2",            # R0 = A_low + B_low (должен быть перенос)
+        "ADDC R1, R3",           # R1 = A_high + B_high + Carry
+        
+        # Результат в R1:R0
+        "HALT"
+    ]
+    
+    print("Программа сложения 64-битных чисел:")
+    print("A = 0x00000001FFFFFFFF")
+    print("B = 0x0000000000000001")
+    print("Ожидаемый результат: 0x0000000200000000")
+    print()
+    
+    for i, line in enumerate(program_assembly):
+        addr = i * 4
+        print(f"  {addr:3d}: {line}")
+    
+    machine_code = loader.assemble_simple(program_assembly)
+    cpu.load_program(machine_code)
+    
+    print("\nВыполнение программы...")
+    cpu.run(max_cycles=50)
+    
+    # Получаем результат
+    result_low = cpu.registers[0] & 0xFFFFFFFF
+    result_high = cpu.registers[1] & 0xFFFFFFFF
+    
+    # Формируем 64-битный результат
+    result_64bit = (result_high << 32) | result_low
+    expected = 0x0000000200000000
+    
+    print(f"\nРезультат длинного сложения:")
+    print(f"  R0 (младшие 32 бита): 0x{result_low:08X}")
+    print(f"  R1 (старшие 32 бита): 0x{result_high:08X}")
+    print(f"  Полный 64-битный результат: 0x{result_64bit:016X}")
+    print(f"  Ожидаемый результат:        0x{expected:016X}")
+    print(f"  Правильность: {'✅' if result_64bit == expected else '❌'}")
+    
+    print_cpu_state(cpu)
+
+
 def main():
     """Главная функция с демонстрацией возможностей CPU"""
     try:
@@ -173,6 +242,7 @@ def main():
         # demo_stack_operations()
         demo_array_sum()
         demo_array_convolution()
+        demo_long_arithmetic()
 
         print("\n=== Демонстрация завершена успешно! ===")
 
