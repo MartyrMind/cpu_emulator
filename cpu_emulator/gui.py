@@ -10,12 +10,19 @@ from loguru import logger
 
 from cpu_emulator.core.cpu import CPU
 from cpu_emulator.core.program_loader import ProgramLoader
+from cpu_emulator.utils.demo_programs import (
+    program_array_sum,
+    program_convolution,
+    program_array_sum_long,
+    list_demo_names,
+    get_demo_by_name,
+)
 
 
 class CPUEmulatorApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("CPU Emulator")
+        self.title("Эмулятор CPU")
         self.geometry("1000x680")
 
         self.cpu = CPU()
@@ -25,46 +32,87 @@ class CPUEmulatorApp(tk.Tk):
         self._create_widgets()
         self._running_thread: threading.Thread | None = None
         self._stop_run_flag = threading.Event()
+        # UI state helpers
+        self._prev_reg_values: list[int] = [0] * 9  # R0..R7 and R8(SP)
+        self._prev_flags: dict[str, int] = {}
+        # Removed default label background reliance; flashing restores per-widget original bg
+        self._default_entry_bg: str | None = None
+        self._was_halted: bool = False
 
         self._refresh_ui()
 
     # UI setup
     def _create_widgets(self) -> None:
+        # Menu bar
+        menubar = tk.Menu(self)
+        file_menu = tk.Menu(menubar, tearoff=0)
+        file_menu.add_command(label="Открыть…", command=self._on_load, accelerator="Ctrl+O / ⌘O")
+        file_menu.add_separator()
+        file_menu.add_command(label="Выход", command=self.destroy, accelerator="Ctrl+Q / ⌘Q")
+        menubar.add_cascade(label="Файл", menu=file_menu)
+
+        run_menu = tk.Menu(menubar, tearoff=0)
+        run_menu.add_command(label="Шаг", command=self._on_step, accelerator="F10")
+        run_menu.add_command(label="Пуск", command=self._on_run, accelerator="F5")
+        run_menu.add_command(label="Пауза", command=self._on_pause, accelerator="F6")
+        run_menu.add_command(label="Сброс", command=self._on_reset, accelerator="Ctrl+R / ⌘R")
+        menubar.add_cascade(label="Выполнение", menu=run_menu)
+
+        help_menu = tk.Menu(menubar, tearoff=0)
+        help_menu.add_command(label="О программе", command=lambda: messagebox.showinfo("О программе", "Эмулятор CPU (Tkinter UI)"))
+        menubar.add_cascade(label="Справка", menu=help_menu)
+        self.config(menu=menubar)
+
+        # Global hotkeys
+        self.bind_all("<F5>", lambda e: self._on_run())
+        self.bind_all("<F6>", lambda e: self._on_pause())
+        self.bind_all("<F10>", lambda e: self._on_step())
+        self.bind_all("<Control-r>", lambda e: self._on_reset())
+        self.bind_all("<Control-o>", lambda e: self._on_load())
+        self.bind_all("<Control-q>", lambda e: self.destroy())
+        # macOS Command bindings
+        self.bind_all("<Command-r>", lambda e: self._on_reset())
+        self.bind_all("<Command-o>", lambda e: self._on_load())
+        self.bind_all("<Command-q>", lambda e: self.destroy())
+
         # Top controls frame
         controls = tk.Frame(self)
         controls.pack(side=TOP, fill=X, padx=8, pady=8)
 
-        self.load_btn = tk.Button(controls, text="Load ASM...", command=self._on_load)
+        self.load_btn = tk.Button(controls, text="Загрузить ASM...", command=self._on_load)
         self.load_btn.pack(side=LEFT, padx=4)
 
-        self.reset_btn = tk.Button(controls, text="Reset", command=self._on_reset)
+        self.reset_btn = tk.Button(controls, text="Сброс", command=self._on_reset)
         self.reset_btn.pack(side=LEFT, padx=4)
 
-        self.step_btn = tk.Button(controls, text="Step", command=self._on_step)
+        self.step_btn = tk.Button(controls, text="Шаг", command=self._on_step)
         self.step_btn.pack(side=LEFT, padx=4)
 
-        self.run_btn = tk.Button(controls, text="Run", command=self._on_run)
+        self.run_btn = tk.Button(controls, text="Пуск", command=self._on_run)
         self.run_btn.pack(side=LEFT, padx=4)
 
-        self.pause_btn = tk.Button(controls, text="Pause", command=self._on_pause)
+        self.pause_btn = tk.Button(controls, text="Пауза", command=self._on_pause)
         self.pause_btn.pack(side=LEFT, padx=4)
 
         # Run speed
-        tk.Label(controls, text="Hz:").pack(side=LEFT, padx=(16, 4))
+        tk.Label(controls, text="Гц:").pack(side=LEFT, padx=(16, 4))
         self.speed_var = tk.IntVar(value=20)
         self.speed_entry = tk.Entry(controls, width=6, textvariable=self.speed_var)
         self.speed_entry.pack(side=LEFT)
+        try:
+            self._default_entry_bg = self.speed_entry.cget("bg")
+        except Exception:
+            self._default_entry_bg = None
 
-        # Scenario buttons
+        # Scenarios dropdown
         tk.Label(controls, text="Сценарии:").pack(side=LEFT, padx=(16, 4))
-        self.sc_sum_btn = tk.Button(
-            controls, text="Сумма массива", command=self._scenario_sum
+        self.scenario_var = tk.StringVar(value=list_demo_names()[0])
+        self.scenario_menu = tk.OptionMenu(controls, self.scenario_var, *list_demo_names())
+        self.scenario_menu.pack(side=LEFT, padx=2)
+        self.load_scenario_btn = tk.Button(
+            controls, text="Загрузить", command=self._on_load_scenario
         )
-        self.sc_sum_btn.pack(side=LEFT, padx=2)
-        self.sc_conv_btn = tk.Button(
-            controls, text="Свертка массивов", command=self._scenario_convolution
-        )
-        self.sc_conv_btn.pack(side=LEFT, padx=2)
+        self.load_scenario_btn.pack(side=LEFT, padx=2)
 
         # State panels
         main_panes = tk.PanedWindow(self, sashrelief=tk.RAISED)
@@ -76,11 +124,13 @@ class CPUEmulatorApp(tk.Tk):
         main_panes.add(right_panel)
 
         # Registers and flags in left panel
-        regs_frame = tk.LabelFrame(left_panel, text="Registers")
+        regs_frame = tk.LabelFrame(left_panel, text="Регистры")
         regs_frame.pack(side=TOP, fill=X, padx=4, pady=4)
 
         self.reg_hex_vars: list[tk.StringVar] = []
         self.reg_dec_vars: list[tk.StringVar] = []
+        self.reg_hex_labels: list[tk.Label] = []
+        self.reg_dec_labels: list[tk.Label] = []
         for i in range(9):  # R0..R7 and R8(SP)
             var_hex = tk.StringVar(value="0x00000000")
             var_dec = tk.StringVar(value="(d: 0)")
@@ -90,10 +140,15 @@ class CPUEmulatorApp(tk.Tk):
             row.pack(fill=X)
             name = f"R{i}" if i < 8 else "R8 (SP)"
             tk.Label(row, text=f"{name}:", width=9, anchor="w").pack(side=LEFT)
-            tk.Label(row, textvariable=var_hex, width=12, anchor="w").pack(side=LEFT)
-            tk.Label(row, textvariable=var_dec, width=16, anchor="w").pack(side=LEFT)
+            hex_lbl = tk.Label(row, textvariable=var_hex, width=12, anchor="w")
+            hex_lbl.pack(side=LEFT)
+            dec_lbl = tk.Label(row, textvariable=var_dec, width=16, anchor="w")
+            dec_lbl.pack(side=LEFT)
+            self.reg_hex_labels.append(hex_lbl)
+            self.reg_dec_labels.append(dec_lbl)
+            # no global bg caching needed
 
-        special_frame = tk.LabelFrame(left_panel, text="Special")
+        special_frame = tk.LabelFrame(left_panel, text="Специальные")
         special_frame.pack(side=TOP, fill=X, padx=4, pady=4)
         self.pc_var = tk.StringVar(value="0x00000")
         self.ir_var = tk.StringVar(value="0x00000000")
@@ -108,16 +163,41 @@ class CPUEmulatorApp(tk.Tk):
             tk.Label(row, text=f"{label}:", width=9, anchor="w").pack(side=LEFT)
             tk.Label(row, textvariable=var, width=width, anchor="w").pack(side=LEFT)
 
-        flags_frame = tk.LabelFrame(left_panel, text="Flags")
+        flags_frame = tk.LabelFrame(left_panel, text="Флаги")
         flags_frame.pack(side=TOP, fill=X, padx=4, pady=4)
         self.flag_vars: dict[str, tk.StringVar] = {}
+        self.flag_labels: dict[str, tk.Label] = {}
         for flag in ["Z", "S", "C", "O", "P"]:
             var = tk.StringVar(value="0")
             self.flag_vars[flag] = var
             row = tk.Frame(flags_frame)
             row.pack(fill=X)
             tk.Label(row, text=f"{flag}:", width=9, anchor="w").pack(side=LEFT)
-            tk.Label(row, textvariable=var, width=4, anchor="w").pack(side=LEFT)
+            fl_lbl = tk.Label(row, textvariable=var, width=4, anchor="w")
+            fl_lbl.pack(side=LEFT)
+            self.flag_labels[flag] = fl_lbl
+
+        # Result panel
+        result_frame = tk.LabelFrame(left_panel, text="Результат")
+        result_frame.pack(side=TOP, fill=X, padx=4, pady=4)
+        # R0 result
+        self.result_r0_hex_var = tk.StringVar(value="0x00000000")
+        self.result_r0_dec_var = tk.StringVar(value="(d: 0)")
+        row = tk.Frame(result_frame)
+        row.pack(fill=X)
+        tk.Label(row, text="R0:", width=9, anchor="w").pack(side=LEFT)
+        self.result_r0_hex_lbl = tk.Label(row, textvariable=self.result_r0_hex_var, width=12, anchor="w")
+        self.result_r0_hex_lbl.pack(side=LEFT)
+        self.result_r0_dec_lbl = tk.Label(row, textvariable=self.result_r0_dec_var, width=16, anchor="w")
+        self.result_r0_dec_lbl.pack(side=LEFT)
+        # no global bg caching needed
+        # 64-bit R1:R0 view
+        self.result_64_hex_var = tk.StringVar(value="0x0000000000000000")
+        row64 = tk.Frame(result_frame)
+        row64.pack(fill=X)
+        tk.Label(row64, text="R1:R0 (64-бит):", width=16, anchor="w").pack(side=LEFT)
+        self.result_64_hex_lbl = tk.Label(row64, textvariable=self.result_64_hex_var, width=20, anchor="w")
+        self.result_64_hex_lbl.pack(side=LEFT)
 
         # Right split: Memory (left) and Source (right)
         right_split = tk.PanedWindow(right_panel, orient=tk.HORIZONTAL, sashrelief=tk.RAISED)
@@ -131,24 +211,24 @@ class CPUEmulatorApp(tk.Tk):
         # Memory controls
         mem_controls = tk.Frame(mem_side)
         mem_controls.pack(side=TOP, fill=X)
-        tk.Label(mem_controls, text="Base addr:").pack(side=LEFT)
+        tk.Label(mem_controls, text="Базовый адрес:").pack(side=LEFT)
         self.mem_base_var = tk.StringVar(value="0x0000")
         self.mem_base_entry = tk.Entry(mem_controls, width=12, textvariable=self.mem_base_var)
         self.mem_base_entry.pack(side=LEFT, padx=4)
-        tk.Button(mem_controls, text="Go", command=self._refresh_memory).pack(side=LEFT)
+        tk.Button(mem_controls, text="Перейти", command=self._refresh_memory).pack(side=LEFT)
         # Rows count
-        tk.Label(mem_controls, text="Rows:").pack(side=LEFT, padx=(12, 4))
+        tk.Label(mem_controls, text="Строки:").pack(side=LEFT, padx=(12, 4))
         self.rows_var = tk.IntVar(value=64)
         self.rows_entry = tk.Entry(mem_controls, width=6, textvariable=self.rows_var)
         self.rows_entry.pack(side=LEFT)
         # View mode
-        tk.Label(mem_controls, text="View:").pack(side=LEFT, padx=(12, 4))
+        tk.Label(mem_controls, text="Вид:").pack(side=LEFT, padx=(12, 4))
         self.mem_view_mode = tk.StringVar(value="Words")
         tk.OptionMenu(mem_controls, self.mem_view_mode, "Words", "Bytes", command=lambda _: self._refresh_memory()).pack(side=LEFT)
         # Goto / Follow PC
-        tk.Button(mem_controls, text="Goto PC", command=self._goto_pc).pack(side=LEFT, padx=(12, 4))
+        tk.Button(mem_controls, text="К PC", command=self._goto_pc).pack(side=LEFT, padx=(12, 4))
         self.follow_pc_var = tk.BooleanVar(value=False)
-        tk.Checkbutton(mem_controls, text="Follow PC", variable=self.follow_pc_var).pack(side=LEFT)
+        tk.Checkbutton(mem_controls, text="Следовать за PC", variable=self.follow_pc_var).pack(side=LEFT)
         # Memory view with scrollbar
         mem_view = tk.Frame(mem_side)
         mem_view.pack(side=TOP, fill=BOTH, expand=True, padx=4, pady=4)
@@ -161,7 +241,7 @@ class CPUEmulatorApp(tk.Tk):
         self.mem_text.tag_configure("pc_line", background="#FFF59D")
 
         # Source view
-        src_frame = tk.LabelFrame(src_side, text="Program (ASM)")
+        src_frame = tk.LabelFrame(src_side, text="Программа (ASM)")
         src_frame.pack(side=TOP, fill=BOTH, expand=True, padx=4, pady=4)
         src_container = tk.Frame(src_frame)
         src_container.pack(fill=BOTH, expand=True)
@@ -173,9 +253,40 @@ class CPUEmulatorApp(tk.Tk):
         self.src_text.tag_configure("src_pc_line", background="#E1F5FE")
 
         # Status bar
-        self.status_var = tk.StringVar(value="Ready")
+        self.status_var = tk.StringVar(value="Готово")
         status = tk.Label(self, textvariable=self.status_var, anchor="w")
         status.pack(side=BOTTOM, fill=X)
+
+    def _set_entry_valid(self, entry: tk.Entry, valid: bool) -> None:
+        try:
+            if valid:
+                if self._default_entry_bg is not None:
+                    entry.configure(bg=self._default_entry_bg)
+            else:
+                entry.configure(bg="#FFEBEE")
+        except Exception:
+            pass
+
+    def _flash_widgets(self, widgets: list[tk.Widget], color: str = "#FFF59D", duration_ms: int = 300) -> None:
+        # Capture original backgrounds per widget to restore accurately
+        original_bg: dict[tk.Widget, str] = {}
+        for w in widgets:
+            try:
+                original_bg[w] = w.cget("background")
+            except Exception:
+                pass
+            try:
+                w.configure(background=color)
+            except Exception:
+                pass
+        def restore():
+            for w in widgets:
+                try:
+                    if w in original_bg:
+                        w.configure(background=original_bg[w])
+                except Exception:
+                    pass
+        self.after(duration_ms, restore)
 
     # Actions
     def _on_load(self) -> None:
@@ -218,9 +329,14 @@ class CPUEmulatorApp(tk.Tk):
             return
         self._stop_run_flag.clear()
         try:
-            hz = max(1, int(self.speed_var.get()))
+            hz = int(self.speed_var.get())
+            if hz < 1:
+                raise ValueError
         except Exception:
-            hz = 20
+            self._set_entry_valid(self.speed_entry, False)
+            self.status_var.set("Некорректная частота (Гц). Используйте целое >= 1.")
+            return
+        self._set_entry_valid(self.speed_entry, True)
 
         def runner():
             logger.info("Run started")
@@ -239,11 +355,19 @@ class CPUEmulatorApp(tk.Tk):
 
         self._running_thread = threading.Thread(target=runner, daemon=True)
         self._running_thread.start()
-        self.status_var.set("Running...")
+        self.status_var.set("Выполнение…")
+        try:
+            self._update_controls_state(self.cpu.get_state())
+        except Exception:
+            pass
 
     def _on_pause(self) -> None:
         self._stop_run_flag.set()
-        self.status_var.set("Paused")
+        self.status_var.set("Пауза")
+        try:
+            self._update_controls_state(self.cpu.get_state())
+        except Exception:
+            pass
 
     # UI refreshers
     def _refresh_ui(self) -> None:
@@ -253,9 +377,15 @@ class CPUEmulatorApp(tk.Tk):
             value = state["registers"][f"R{i}"] & 0xFFFFFFFF
             self.reg_hex_vars[i].set(f"0x{value:08X}")
             self.reg_dec_vars[i].set(f"(d: {value})")
+            if value != self._prev_reg_values[i]:
+                self._flash_widgets([self.reg_hex_labels[i], self.reg_dec_labels[i]])
+                self._prev_reg_values[i] = value
         sp_val = state["registers"]["R8"] & 0xFFFFFFFF
         self.reg_hex_vars[8].set(f"0x{sp_val:08X}")
         self.reg_dec_vars[8].set(f"(d: {sp_val})")
+        if sp_val != self._prev_reg_values[8]:
+            self._flash_widgets([self.reg_hex_labels[8], self.reg_dec_labels[8]])
+            self._prev_reg_values[8] = sp_val
 
         # Special
         self.pc_var.set(f"0x{state['pc']:05X}")
@@ -266,7 +396,19 @@ class CPUEmulatorApp(tk.Tk):
 
         # Flags
         for flag, var in self.flag_vars.items():
-            var.set(str(state["flags"].get(flag, 0)))
+            val = int(state["flags"].get(flag, 0))
+            var.set(str(val))
+            if self._prev_flags.get(flag, -1) != val:
+                self._flash_widgets([self.flag_labels[flag]])
+                self._prev_flags[flag] = val
+
+        # Result values (always update; flash on halt transition)
+        r0 = state["registers"]["R0"] & 0xFFFFFFFF
+        r1 = state["registers"]["R1"] & 0xFFFFFFFF
+        r64 = ((r1 << 32) | r0) & 0xFFFFFFFFFFFFFFFF
+        self.result_r0_hex_var.set(f"0x{r0:08X}")
+        self.result_r0_dec_var.set(f"(d: {r0})")
+        self.result_64_hex_var.set(f"0x{r64:016X}")
 
         # Adjust memory base if follow PC is enabled
         try:
@@ -300,6 +442,52 @@ class CPUEmulatorApp(tk.Tk):
         self._refresh_memory()
         # Source highlight
         self._refresh_source_highlight()
+        # Controls state
+        try:
+            self._update_controls_state(state)
+        except Exception:
+            pass
+        # Flash results on transition to halted
+        try:
+            if bool(state.get("halted", False)) and not self._was_halted:
+                self._flash_widgets([self.result_r0_hex_lbl, self.result_r0_dec_lbl, self.result_64_hex_lbl])
+                self.status_var.set("Остановлено. Результат обновлён.")
+                self._was_halted = True
+            elif not bool(state.get("halted", False)):
+                self._was_halted = False
+        except Exception:
+            pass
+
+    def _update_controls_state(self, state: dict) -> None:
+        is_running_thread = self._running_thread is not None and self._running_thread.is_alive()
+        is_halted = bool(state.get("halted", False))
+
+        # Load and scenarios are disabled while running
+        set_disabled_while_running = [self.load_btn, self.scenario_menu, self.load_scenario_btn]
+        for btn in set_disabled_while_running:
+            try:
+                btn.configure(state=tk.DISABLED if is_running_thread else tk.NORMAL)
+            except Exception:
+                pass
+
+        # Run/Step disabled when running or halted
+        try:
+            self.run_btn.configure(state=tk.DISABLED if (is_running_thread or is_halted) else tk.NORMAL)
+            self.step_btn.configure(state=tk.DISABLED if (is_running_thread or is_halted) else tk.NORMAL)
+        except Exception:
+            pass
+
+        # Pause enabled only when running
+        try:
+            self.pause_btn.configure(state=tk.NORMAL if is_running_thread else tk.DISABLED)
+        except Exception:
+            pass
+
+        # Reset always enabled
+        try:
+            self.reset_btn.configure(state=tk.NORMAL)
+        except Exception:
+            pass
 
     def _parse_base_address(self) -> int:
         text = self.mem_base_var.get().strip()
@@ -311,11 +499,25 @@ class CPUEmulatorApp(tk.Tk):
             return 0
 
     def _refresh_memory(self) -> None:
-        base = self._parse_base_address()
+        text = self.mem_base_var.get().strip()
+        base_ok = True
         try:
-            rows = max(1, int(self.rows_var.get()))
+            if text.lower().startswith("0x"):
+                base = int(text, 16)
+            else:
+                base = int(text)
+        except Exception:
+            base = 0
+            base_ok = False
+        self._set_entry_valid(self.mem_base_entry, base_ok)
+        try:
+            rows_val = int(self.rows_var.get())
+            rows = max(1, rows_val)
+            rows_ok = rows_val >= 1
         except Exception:
             rows = 64
+            rows_ok = False
+        self._set_entry_valid(self.rows_entry, rows_ok)
 
         mode = self.mem_view_mode.get()
         self.mem_text.configure(state=tk.NORMAL)
@@ -426,35 +628,7 @@ class CPUEmulatorApp(tk.Tk):
     # Built-in scenarios
     def _scenario_sum(self) -> None:
         """Load and run array sum scenario."""
-        program_assembly = [
-            # Initialize array [10,20,30,40,50] at 2000..2016
-            "MOV R1, #2000",
-            "MOV R2, #10",
-            "STORE [R1], R2",
-            "ADD R1, #4",
-            "MOV R2, #20",
-            "STORE [R1], R2",
-            "ADD R1, #4",
-            "MOV R2, #30",
-            "STORE [R1], R2",
-            "ADD R1, #4",
-            "MOV R2, #40",
-            "STORE [R1], R2",
-            "ADD R1, #4",
-            "MOV R2, #50",
-            "STORE [R1], R2",
-            # Sum loop
-            "MOV R0, #0",
-            "MOV R1, #2000",
-            "MOV R3, #5",
-            "LOAD R2, [R1]",
-            "ADD R0, R2",
-            "ADD R1, #4",
-            "SUB R3, #1",
-            "CMP R3, #0",
-            "JNZ 72",
-            "HALT",
-        ]
+        program_assembly = program_array_sum()
         try:
             machine_code = self.loader.assemble_simple(program_assembly)
             self.cpu.reset()
@@ -469,55 +643,7 @@ class CPUEmulatorApp(tk.Tk):
 
     def _scenario_convolution(self) -> None:
         """Load and run convolution scenario."""
-        program_assembly = [
-            # Initialize A[1,2,3,4,5] at 3000..3016
-            "MOV R1, #3000",
-            "MOV R2, #1",
-            "STORE [R1], R2",
-            "ADD R1, #4",
-            "MOV R2, #2",
-            "STORE [R1], R2",
-            "ADD R1, #4",
-            "MOV R2, #3",
-            "STORE [R1], R2",
-            "ADD R1, #4",
-            "MOV R2, #4",
-            "STORE [R1], R2",
-            "ADD R1, #4",
-            "MOV R2, #5",
-            "STORE [R1], R2",
-            # Initialize B[5,4,3,2,1] at 4000..4016
-            "MOV R1, #4000",
-            "MOV R2, #5",
-            "STORE [R1], R2",
-            "ADD R1, #4",
-            "MOV R2, #4",
-            "STORE [R1], R2",
-            "ADD R1, #4",
-            "MOV R2, #3",
-            "STORE [R1], R2",
-            "ADD R1, #4",
-            "MOV R2, #2",
-            "STORE [R1], R2",
-            "ADD R1, #4",
-            "MOV R2, #1",
-            "STORE [R1], R2",
-            # Convolution loop
-            "MOV R0, #0",
-            "MOV R1, #3000",
-            "MOV R2, #4000",
-            "MOV R7, #5",
-            "LOAD R3, [R1]",
-            "LOAD R4, [R2]",
-            "MUL R3, R4",
-            "ADD R0, R3",
-            "ADD R1, #4",
-            "ADD R2, #4",
-            "SUB R7, #1",
-            "CMP R7, #0",
-            "JNZ 136",
-            "HALT",
-        ]
+        program_assembly = program_convolution()
         try:
             machine_code = self.loader.assemble_simple(program_assembly)
             self.cpu.reset()
@@ -528,6 +654,36 @@ class CPUEmulatorApp(tk.Tk):
             self._refresh_ui()
         except Exception as e:
             logger.exception("Scenario convolution failed")
+            messagebox.showerror("Scenario Error", str(e))
+
+    def _scenario_sum_long(self) -> None:
+        """Load and run 64-bit array sum scenario (R1:R0)."""
+        program_assembly = program_array_sum_long()
+        try:
+            machine_code = self.loader.assemble_simple(program_assembly)
+            self.cpu.reset()
+            self.cpu.load_program(machine_code)
+            self.current_source_lines = program_assembly
+            self._populate_source_view()
+            self.status_var.set("Сценарий 'Сумма массива (64-бит)' загружен. Нажмите Пуск для запуска.")
+            self._refresh_ui()
+        except Exception as e:
+            logger.exception("Scenario sum64 failed")
+            messagebox.showerror("Scenario Error", str(e))
+
+    def _on_load_scenario(self) -> None:
+        try:
+            name = self.scenario_var.get()
+            program_assembly = get_demo_by_name(name)
+            machine_code = self.loader.assemble_simple(program_assembly)
+            self.cpu.reset()
+            self.cpu.load_program(machine_code)
+            self.current_source_lines = program_assembly
+            self._populate_source_view()
+            self.status_var.set(f"Сценарий '{name}' загружен. Нажмите Пуск для запуска.")
+            self._refresh_ui()
+        except Exception as e:
+            logger.exception("Scenario load failed")
             messagebox.showerror("Scenario Error", str(e))
 
 
